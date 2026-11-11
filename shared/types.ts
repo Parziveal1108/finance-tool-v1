@@ -71,6 +71,53 @@ export interface Settings {
   default_account_id: string | null;
   emergency_months: number;
   demo: boolean;
+  match: MatchSettings;
+  pay: PaySettings;
+  housing: HousingScenario | null;
+}
+
+/** Employer retirement match: `rate`% of what you put in, on contributions up to `limit_pct`% of pay. */
+export interface MatchSettings {
+  rate: number;
+  limit_pct: number | null;
+  /** Gross annual pay. */
+  salary: number | null;
+  /** What you currently contribute, as a percent of pay. */
+  contributing_pct: number | null;
+}
+
+export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
+
+/** How you are paid. Amount and anchor are detected from deposits unless set here. */
+export interface PaySettings {
+  frequency: PayFrequency;
+  amount: number | null;
+  /** Any one payday, YYYY-MM-DD; the rest of the schedule follows from it. */
+  anchor: string | null;
+}
+
+/** One rent-or-buy scenario. Rates and percentages are annual, in percent. */
+export interface HousingScenario {
+  price: number;
+  down_pct: number;
+  rate: number;
+  term_years: number;
+  tax_pct: number;
+  insurance_yr: number;
+  hoa_mo: number;
+  maint_pct: number;
+  pmi_pct: number;
+  closing_pct: number;
+  sell_pct: number;
+  rent: number;
+  rent_insurance_mo: number;
+  rent_growth: number;
+  appreciation: number;
+  invest_return: number;
+  inflation: number;
+  years: number;
+  /** Gross annual household income, for lender-style ratios. */
+  gross_income: number | null;
 }
 
 export type Severity = 'critical' | 'warn' | 'info' | 'good';
@@ -125,7 +172,7 @@ export interface MonthFlow {
 }
 
 export interface NextDollar {
-  target: 'buffer' | 'debt' | 'emergency' | 'invest' | 'goal';
+  target: 'buffer' | 'match' | 'debt' | 'emergency' | 'invest' | 'goal';
   title: string;
   reason: string;
   steps: { label: string; done: boolean; current: boolean; detail: string }[];
@@ -169,6 +216,8 @@ export interface AppState {
   monthlySpendAvg: number;
   monthlyIncomeAvg: number;
   nextDollar: NextDollar | null;
+  /** Pay schedule: settings where given, otherwise detected from income deposits. */
+  pay: { frequency: PayFrequency; amount: number | null; anchor: string | null; nextDate: string | null; perYear: number; detected: boolean };
   recurring: { name: string; amount: number; category: string; lastDate: string; nextDate: string; changed: number | null }[];
   hasData: boolean;
 }

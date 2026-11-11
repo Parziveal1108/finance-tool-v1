@@ -5,11 +5,14 @@ import { q, nowIso, isoDate, patchSettings, setSetting } from '../db';
 import { CATEGORIES, CATEGORY_IDS, categoryLabel } from '../../shared/categories';
 import { simulatePayoff, addMonths, type PayoffDebt } from '../../shared/payoff';
 import { allocateWindfall, compareRefinance, debtVsInvest, forecast, independenceNumber, monthReached } from '../../shared/planning';
+import { defaultScenario, maxPrice, ownerMonthly, rentVsBuy, upfront } from '../../shared/housing';
+import { extraPaycheckMonths, matchSummary, nextPaydays } from '../../shared/paycheck';
+import type { HousingScenario } from '../../shared/types';
 import type { InsightAction } from '../../shared/types';
 import { MODEL } from './ai-config';
 import { buildCore, buildState } from './state';
 import { addAssistantInsight, allocation, refreshInsights } from './insights';
-import { AccountInput, BudgetInput, GoalInput, HoldingInput, TxInput, addRule, addTransactions, setBudgets, upsertAccount, upsertGoal, upsertHolding } from './store';
+import { AccountInput, BudgetInput, GoalInput, HoldingInput, HousingInput, TxInput, addRule, addTransactions, setBudgets, upsertAccount, upsertGoal, upsertHolding } from './store';
 import { refreshQuotes } from './quotes';
 
 let client: Anthropic | null = null;
@@ -27,7 +30,8 @@ How to be useful here:
 - When they tell you facts about their finances (an account, a balance, a debt and its rate, a purchase, a holding), record them straight away with the write tools, then say in a line or two what you saved. Do not ask for confirmation first; they told you so that you would enter it. If a detail that changes the math is missing (a debt's APR or minimum payment, a goal's target), record what you have and ask for the missing piece afterwards.
 - When they paste or attach a statement, a list or a screenshot, extract every account, transaction or holding you can read from it and record them. Mention anything you could not read.
 - When they ask you to change a budget, the debt plan or a goal, make the change. When you want to recommend a change they have not asked for, explain it with the numbers and either ask, or file it with create_suggestion so it appears as a card they can apply with one tap.
-- Use the calculators instead of reasoning about interest or growth in your head: simulate_debt_payoff for payoff plans, plan_windfall for a lump sum, compare_debt_vs_invest for spare monthly money, evaluate_refinance for a balance transfer or consolidation loan, and forecast_net_worth for the long view. They run on this person's real balances and match what the Plan page of the app shows.
+- Use the calculators instead of reasoning about interest or growth in your head: simulate_debt_payoff for payoff plans, plan_windfall for a lump sum, compare_debt_vs_invest for spare monthly money, evaluate_refinance for a balance transfer or consolidation loan,, forecast_net_worth for the long view, and analyze_housing for renting, buying and the comparison between them. They run on this person's real balances and match what the Plan page of the app shows.
+- When they tell you about their pay, their employer's retirement match, or a home or rent they are considering, save it with save_profile so the app's own tools and monitoring use it.
 - Sign conventions: transaction amounts are negative for money out and positive for money in. Credit card and loan balances are the amount owed, stored as positive numbers.
 
 How to write: this is a chat panel, often on a phone. Lead with the answer, keep replies short, use specific dollar amounts and dates, and write in plain language. Short paragraphs and the occasional brief list are fine; no tables or headings.
@@ -76,6 +80,9 @@ function overview() {
     recurring_charges: s.recurring,
     next_dollar: s.nextDollar ? { title: s.nextDollar.title, reason: s.nextDollar.reason } : null,
     existing_suggestions: s.insights.map((i) => ({ title: i.title, severity: i.severity, area: i.area, has_action: !!i.action })),
+    pay: { ...s.pay, next_paydays: s.pay.anchor ? nextPaydays(s.pay.anchor, s.pay.frequency, s.today, 3) : [], extra_paycheck_months: s.pay.anchor ? extraPaycheckMonths(s.pay.anchor, s.pay.frequency, s.today, 12) : [] },
+    employer_match: { ...s.settings.match, ...matchSummary(s.settings.match) },
+    housing_scenario: s.settings.housing,
     emergency_fund_target_months: s.settings.emergency_months,
     using_demo_data: s.settings.demo,
   };
@@ -250,6 +257,57 @@ function tools(ctx: RunContext) {
       ...eager,
     }),
     betaZodTool({
+      name: 'analyze_housing',
+      description: "Analyse renting, owning and rent-versus-buy. Starts from the saved housing scenario (or sensible placeholders) and applies any fields you pass. Returns the monthly cost of owning itemised, cash needed, the price their income supports, and year-by-year wealth for owner and renter where both spend the same each month and the cheaper side invests the difference. Also returns how the mortgage interest would have grown if invested, against equity from payments and from appreciation. Taxes are not modelled. Does not change anything; use save_profile to keep a scenario.",
+      inputSchema: z.object({ scenario: HousingInput.partial().nullish().describe('Fields to override, e.g. price, down_pct, rate, rent, appreciation, invest_return, years') }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        const rentGuess = s.budgets.find((b) => b.category === 'housing')?.average || 1500;
+        const scn: HousingScenario = { ...defaultScenario(rentGuess, s.settings.match.salary), ...(s.settings.housing ?? {}), ...(a.scenario ?? {}) } as HousingScenario;
+        scn.gross_income ??= s.settings.match.salary;
+        const p = rentVsBuy(scn);
+        const n = scn.years;
+        const cash = upfront(scn);
+        const cost = ownerMonthly(scn);
+        const grossMo = scn.gross_income ? scn.gross_income / 12 : null;
+        const debtMins = s.debts.reduce((t, d) => t + d.min_payment, 0);
+        const at = [...new Set([1, 3, 5, 10, 15, 20, 30, n].filter((y) => y <= n))].sort((x, y) => x - y);
+        return JSON.stringify({
+          scenario_used: scn,
+          saved_scenario_exists: !!s.settings.housing,
+          owning: { monthly_cost_first_year: cost, cash_needed: cash, cash_on_hand: s.totals.cash, pmi_ends_after_months: p.pmiEndsMonth, share_of_take_home: s.monthlyIncomeAvg ? Math.round((cost.total / s.monthlyIncomeAvg) * 100) / 100 : null },
+          affordability: grossMo ? { gross_monthly: Math.round(grossMo), other_debt_minimums: debtMins, housing_ratio: Math.round((cost.total / grossMo) * 100) / 100, total_debt_ratio: Math.round(((cost.total + debtMins) / grossMo) * 100) / 100, price_at_28_36_guideline: maxPrice(scn, Math.min(grossMo * 0.28, grossMo * 0.36 - debtMins)) } : 'gross income not set',
+          renting: { monthly_now: scn.rent + scn.rent_insurance_mo, monthly_in_final_year: p.renterMonthly[n], total_paid: p.renterSpent[n], share_of_take_home: s.monthlyIncomeAvg ? Math.round((scn.rent / s.monthlyIncomeAvg) * 100) / 100 : null },
+          comparison: { horizon_years: n, owner_net_worth: p.ownerNet[n], renter_net_worth: p.renterNet[n], buying_ahead_by: Math.round((p.ownerNet[n] - p.renterNet[n]) * 100) / 100, first_year_buying_is_ahead: p.breakEvenYear, by_year: at.map((y) => ({ year: y, owner: p.ownerNet[y], renter: p.renterNet[y] })) },
+          interest_vs_equity: { interest_paid: p.interestPaid[n], interest_if_invested_instead: p.interestInvested[n], equity_from_down_payment_and_principal: p.paidIn[n], equity_from_appreciation: p.appreciation[n], total_equity_before_selling_costs: p.equity[n], home_value: p.homeValue[n], loan_balance: p.loanBalance[n] },
+        });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
+      name: 'save_profile',
+      description: "Save facts about how they are paid, their employer's retirement match, or the housing scenario they are weighing. Only pass what they told you; anything omitted is left as it is.",
+      inputSchema: z.object({
+        pay: z.object({ frequency: z.enum(['weekly', 'biweekly', 'semimonthly', 'monthly']), amount: z.number().positive().nullish().describe('Take-home per paycheck'), anchor: z.string().nullish().describe('Any one payday, YYYY-MM-DD') }).partial().nullish(),
+        match: z.object({ rate: z.number().min(0).max(200).describe('Percent of their contribution the employer adds, e.g. 50'), limit_pct: z.number().min(0).max(100).describe('Matched up to this percent of pay'), salary: z.number().positive().describe('Gross annual pay'), contributing_pct: z.number().min(0).max(100).describe('What they contribute now, percent of pay') }).partial().nullish(),
+        housing: HousingInput.partial().nullish(),
+      }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null)) as Partial<T>;
+        if (a.pay) patchSettings({ pay: { ...s.settings.pay, ...clean(a.pay) } });
+        if (a.match) patchSettings({ match: { ...s.settings.match, ...clean(a.match) } });
+        if (a.housing) {
+          const rentGuess = s.budgets.find((b) => b.category === 'housing')?.average || 1500;
+          const salary = a.match?.salary ?? s.settings.match.salary;
+          const merged = { ...defaultScenario(rentGuess, salary), ...(s.settings.housing ?? {}), ...clean(a.housing) };
+          patchSettings({ housing: HousingInput.parse({ ...merged, gross_income: merged.gross_income ?? salary }) });
+        }
+        return wrote({ ok: true });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
       name: 'save_accounts',
       description: 'Create or update accounts: bank accounts, credit cards, loans, investment accounts, or assets such as a home or car. Pass id to update an existing one (for example to correct a balance).',
       inputSchema: z.object({ accounts: z.array(AccountInput).min(1) }),
@@ -384,6 +442,8 @@ const TOOL_LABEL: Record<string, string> = {
   compare_debt_vs_invest: 'Comparing debt and investing',
   evaluate_refinance: 'Pricing the refinance',
   forecast_net_worth: 'Projecting your net worth',
+  analyze_housing: 'Running the housing numbers',
+  save_profile: 'Saving your details',
   save_accounts: 'Saving accounts',
   add_transactions: 'Recording transactions',
   set_budgets: 'Updating budget',

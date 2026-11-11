@@ -50,11 +50,30 @@ describe('state', () => {
     expect(names).not.toContain("Trader Joe's");
   });
 
-  it('points the next spare dollar at the most expensive debt once a cushion exists', () => {
-    const { state } = m.state.buildCore(NOW);
+  it('puts an unclaimed employer match ahead of debt, then the most expensive debt', () => {
+    let { state } = m.state.buildCore(NOW);
+    expect(state.nextDollar!.target).toBe('match');
+    expect(state.nextDollar!.title).toBe('Raise your retirement contribution to 6%');
+    expect(state.nextDollar!.steps.map((s) => s.label)).toEqual(['One-month cushion', 'Full employer match', 'High-interest debt', '3-month emergency fund', 'Invest and fund goals']);
+    expect(state.nextDollar!.steps.filter((s) => s.current)).toHaveLength(1);
+
+    const match = state.settings.match;
+    m.db.patchSettings({ match: { ...match, contributing_pct: 6 } });
+    ({ state } = m.state.buildCore(NOW));
     expect(state.nextDollar!.target).toBe('debt');
     expect(state.nextDollar!.title).toContain('Northwind Store Card');
-    expect(state.nextDollar!.steps.filter((s) => s.current)).toHaveLength(1);
+
+    // No match at all: the rung disappears.
+    m.db.patchSettings({ match: { ...match, rate: 0 } });
+    expect(m.state.buildCore(NOW).state.nextDollar!.steps).toHaveLength(4);
+    m.db.patchSettings({ match });
+  });
+
+  it('reads the pay schedule from deposits', () => {
+    const { state } = m.state.buildCore(NOW);
+    expect(state.pay).toEqual({ frequency: 'biweekly', amount: 2455.12, anchor: '2026-11-06', nextDate: '2026-11-20', perYear: 26, detected: true });
+    // July 2026 carried three paychecks.
+    expect(state.flows.find((f) => f.month === '2026-07')!.income).toBeCloseTo(2455.12 * 3, 2);
   });
 });
 
@@ -70,8 +89,24 @@ describe('monitor', () => {
     expect(byKey('goal:behind')!.action).toMatchObject({ type: 'set_goal_contribution' });
     expect(byKey('invest:drift')).toBeTruthy();
     expect(byKey('invest:concentration')).toBeUndefined(); // NVDA is 18% of holdings, under the 20% line
+    const unclaimed = byKey('match:unclaimed')!;
+    expect(unclaimed.severity).toBe('warn');
+    expect(unclaimed.title).toBe('$840 a year of employer match is going unclaimed'); // 50% of the missing 2% of $84,000
+    expect(byKey('debt:transfer')).toBeTruthy();
+    expect(byKey('pay:extra')).toBeUndefined(); // neither November nor December 2026 has a third payday
     // Every key is unique so suggestions can be tracked and dismissed individually.
     expect(new Set(drafts.map((d) => d.key)).size).toBe(drafts.length);
+  });
+
+  it('flags a month with a third paycheck and asks for match details when unknown', () => {
+    const jan = new Date(2027, 0, 4);
+    m.db.patchSettings({ pay: { frequency: 'biweekly', amount: 2455.12, anchor: '2026-11-06' }, match: { rate: 50, limit_pct: null, salary: null, contributing_pct: null } });
+    const drafts = m.insights.computeInsights(m.state.buildCore(jan));
+    const extra = drafts.find((d) => d.key === 'pay:extra:2027-01')!;
+    expect(extra.title).toBe('January has three paychecks');
+    expect(extra.body).toContain('Jan 29');
+    expect(drafts.find((d) => d.key === 'match:setup')).toBeTruthy();
+    m.db.patchSettings({ pay: { frequency: 'biweekly', amount: null, anchor: null }, match: { rate: 50, limit_pct: 6, salary: 84000, contributing_pct: 4 } });
   });
 
   it('applies a budget shift without changing the total', () => {

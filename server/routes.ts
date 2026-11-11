@@ -7,7 +7,7 @@ import type { InsightAction, Settings } from '../shared/types';
 import { buildState, toTransaction } from './lib/state';
 import { applyAction, refreshInsights } from './lib/insights';
 import { emit, subscribe } from './lib/events';
-import { AccountInput, BudgetInput, GoalInput, HoldingInput, TxInput, addRule, addTransactions, setBudgets, upsertAccount, upsertGoal, upsertHolding, userRules } from './lib/store';
+import { AccountInput, BudgetInput, GoalInput, HoldingInput, HousingInput, TxInput, addRule, addTransactions, setBudgets, upsertAccount, upsertGoal, upsertHolding, userRules } from './lib/store';
 import { createLinkToken, exchangePublicToken, plaidConfigured, plaidMessage, removeItem, syncAll, syncItem } from './lib/plaid';
 import { refreshQuotes } from './lib/quotes';
 import { loadDemo } from './lib/demo';
@@ -71,6 +71,9 @@ api.patch('/settings', wrap((req, res) => {
       target_allocation: z.record(z.string(), z.number().min(0).max(100)).nullable(),
       default_account_id: z.string().nullable(),
       emergency_months: z.number().min(1).max(24),
+      match: z.object({ rate: z.number().min(0).max(200), limit_pct: z.number().min(0).max(100).nullable(), salary: z.number().min(0).max(100_000_000).nullable(), contributing_pct: z.number().min(0).max(100).nullable() }),
+      pay: z.object({ frequency: z.enum(['weekly', 'biweekly', 'semimonthly', 'monthly']), amount: z.number().min(0).nullable(), anchor: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable() }),
+      housing: HousingInput.nullable(),
     })
     .partial()
     .parse(req.body);
@@ -284,7 +287,7 @@ function wipeDemo() {
   q.run('DELETE FROM snapshots');
   q.run('DELETE FROM insights');
   setSetting('brief', null);
-  patchSettings({ demo: false, default_account_id: null, extra_payment: 0, target_allocation: null });
+  patchSettings({ demo: false, default_account_id: null, extra_payment: 0, target_allocation: null, match: { rate: 50, limit_pct: null, salary: null, contributing_pct: null }, pay: { frequency: 'biweekly', amount: null, anchor: null }, housing: null });
 }
 
 // --- Assistant --------------------------------------------------------------------

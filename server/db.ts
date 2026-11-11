@@ -144,6 +144,9 @@ const DEFAULTS: Settings = {
   default_account_id: null,
   emergency_months: 3,
   demo: false,
+  match: { rate: 50, limit_pct: null, salary: null, contributing_pct: null },
+  pay: { frequency: 'biweekly', amount: null, anchor: null },
+  housing: null,
 };
 
 export function getSetting<T>(key: string, fallback: T): T {

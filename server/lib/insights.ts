@@ -3,6 +3,7 @@ import { q, uid, nowIso, getSetting, setSetting, patchSettings } from '../db';
 import { categoryLabel, category, isEssential } from '../../shared/categories';
 import { simulatePayoff, addMonths, round2, type PayoffDebt } from '../../shared/payoff';
 import { compareRefinance } from '../../shared/planning';
+import { extraPaycheckMonths, matchSummary } from '../../shared/paycheck';
 import type { AssetClass, Insight, InsightAction, Severity } from '../../shared/types';
 import { buildCore, HIGH_APR, type Core } from './state';
 
@@ -224,6 +225,41 @@ export function computeInsights({ state: s, txns }: Core): Draft[] {
     if (rate < 0) {
       add(`cash:negative:${mk}`, 'cash', 'warn', `You have been spending more than you earn`,
         `Over recent months spending averaged ${usd(s.monthlySpendAvg)} against ${usd(s.monthlyIncomeAvg)} of income — about ${usd(s.monthlySpendAvg - s.monthlyIncomeAvg)} a month coming from savings or credit.`);
+    }
+  }
+
+  // ---- Employer match -------------------------------------------------------------
+  const match = s.settings.match;
+  if (match.rate > 0) {
+    const m = matchSummary(match);
+    if (m.configured && !m.full && m.unclaimed >= 50) {
+      const perCheck = m.costToMax / s.pay.perYear;
+      add(`match:unclaimed:${match.contributing_pct}:${match.limit_pct}`, 'invest', 'warn', `${usd(m.unclaimed)} a year of employer match is going unclaimed`,
+        `You contribute ${match.contributing_pct}% and your employer matches ${match.rate}% of the first ${match.limit_pct}%. Going to ${match.limit_pct}% costs about ${usd(perCheck)} per paycheck before tax and adds ${usd(m.unclaimed)} a year from your employer. That is an immediate ${match.rate}% return, ahead of even your highest-rate debt. The change is made with your payroll or retirement provider.`);
+    } else if (!m.configured) {
+      add('match:setup', 'invest', 'info', `Check you are getting your full ${match.rate}% employer match`,
+        `Enter your pay, what you contribute and the match limit under Plan → Employer match. Any match you are not collecting is the best return available to you, and it takes priority over extra debt payments.`);
+    }
+  }
+
+  // ---- Paychecks ------------------------------------------------------------------
+  if (s.pay.anchor && s.pay.amount) {
+    const horizon = s.month.dayOfMonth >= 20 ? 1 : 0;
+    const extra = extraPaycheckMonths(s.pay.anchor, s.pay.frequency, s.today, horizon + 1).find((e) => e.extraPayday >= s.today);
+    if (extra) {
+      const name = monthName(extra.month).split(' ')[0];
+      add(`pay:extra:${extra.month}`, 'cash', 'info', `${name} has ${s.pay.frequency === 'biweekly' ? 'three' : 'five'} paychecks`,
+        `Your monthly bills are covered by the usual ${s.pay.frequency === 'biweekly' ? 'two' : 'four'}, so the check on ${new Date(`${extra.extraPayday}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} — about ${usd(s.pay.amount)} — is unassigned. Decide where it goes before it arrives: Plan → Windfall splits it for you.`);
+    }
+  }
+
+  // ---- Housing --------------------------------------------------------------------
+  const housing = s.budgets.find((b) => b.category === 'housing');
+  if (housing && s.monthlyIncomeAvg > 0 && housing.average > 0) {
+    const share = housing.average / s.monthlyIncomeAvg;
+    if (share >= 0.4) {
+      add(`housing:share:${Math.round(share * 20)}`, 'budget', 'info', `Housing takes ${Math.round(share * 100)}% of your take-home pay`,
+        `About ${usd(housing.average)} of ${usd(s.monthlyIncomeAvg)} a month. Around a third is the usual ceiling; above it, debt payoff and saving get squeezed. Plan → Renting shows what each $100 less would do for your debt-free date.`);
     }
   }
 

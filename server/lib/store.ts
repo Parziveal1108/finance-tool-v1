@@ -158,3 +158,26 @@ export function addRule(pattern: string, cat: string): number {
   q.run('INSERT INTO rules (pattern, category) VALUES (?, ?) ON CONFLICT(pattern) DO UPDATE SET category = excluded.category', p, cat);
   return q.run("UPDATE transactions SET category = ? WHERE LOWER(COALESCE(merchant, '') || ' ' || name) LIKE ? ESCAPE '\\'", cat, `%${p.replace(/[\\%_]/g, '\\$&')}%`).changes;
 }
+
+const pct = (max: number) => z.number().min(0).max(max);
+export const HousingInput = z.object({
+  price: z.number().min(1000).max(100_000_000),
+  down_pct: pct(100),
+  rate: pct(30),
+  term_years: z.number().min(1).max(50),
+  tax_pct: pct(10),
+  insurance_yr: z.number().min(0).max(1_000_000),
+  hoa_mo: z.number().min(0).max(100_000),
+  maint_pct: pct(10),
+  pmi_pct: pct(5),
+  closing_pct: pct(15),
+  sell_pct: pct(15),
+  rent: z.number().min(0).max(1_000_000),
+  rent_insurance_mo: z.number().min(0).max(10_000),
+  rent_growth: z.number().min(-10).max(30),
+  appreciation: z.number().min(-10).max(30),
+  invest_return: z.number().min(-10).max(30),
+  inflation: z.number().min(-5).max(30),
+  years: z.number().int().min(1).max(40),
+  gross_income: z.number().min(0).max(100_000_000).nullable(),
+});
