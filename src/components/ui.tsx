@@ -1,4 +1,4 @@
-import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { useEffect, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { X } from 'lucide-react';
 
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
@@ -153,5 +153,23 @@ export function Delta({ value, goodWhen = 'up', format, suffix }: { value: numbe
       {format(Math.abs(value))}
       <span className="font-normal text-muted">{up ? 'up' : 'down'}{suffix ? ` ${suffix}` : ''}</span>
     </span>
+  );
+}
+
+/** Labelled range input with its current value shown large; the track fills to the thumb. */
+export function Slider({ label, value, onChange, min, max, step, format, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step: number; format: (v: number) => string; hint?: string }) {
+  const id = useId();
+  const clamped = Math.min(max, Math.max(min, value));
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor={id} className="text-[13px] font-medium text-ink-2">
+          {label}
+        </label>
+        <span className="tabular text-lg font-semibold">{format(value)}</span>
+      </div>
+      <input id={id} type="range" min={min} max={max} step={step} value={clamped} onChange={(e) => onChange(Number(e.target.value))} aria-valuetext={format(value)} style={{ ['--fill' as string]: `${((clamped - min) / (max - min)) * 100}%` }} />
+      {hint && <p className="text-xs text-muted">{hint}</p>}
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeftRight, Home as HomeIcon, Landmark, PiggyBank, Plus, Sparkles, Target, TrendingDown, TrendingUp, Wallet, X } from 'lucide-react';
+import { ArrowLeftRight, Compass, Home as HomeIcon, Landmark, PiggyBank, Plus, Sparkles, Target, TrendingDown, TrendingUp, Wallet, X } from 'lucide-react';
 import type { Account, Goal, Holding, Transaction } from '../shared/types';
 import { api, useAppState, useLiveUpdates, useRefresh } from './lib/api';
 import { Assistant } from './components/Assistant';
@@ -16,6 +16,7 @@ import { Goals } from './pages/Goals';
 import { Home } from './pages/Home';
 import { Invest } from './pages/Invest';
 import { Login } from './pages/Login';
+import { Plan } from './pages/Plan';
 import { Welcome } from './pages/Welcome';
 
 const PAGES = [
@@ -24,11 +25,12 @@ const PAGES = [
   { id: 'debt', label: 'Debt', Icon: TrendingDown },
   { id: 'invest', label: 'Invest', Icon: TrendingUp },
   { id: 'goals', label: 'Goals', Icon: Target },
+  { id: 'plan', label: 'Plan', Icon: Compass },
   { id: 'activity', label: 'Activity', Icon: ArrowLeftRight },
   { id: 'accounts', label: 'Accounts', Icon: Landmark },
 ] as const;
 type PageId = (typeof PAGES)[number]['id'];
-const MOBILE_TABS: PageId[] = ['home', 'budget', 'debt', 'invest', 'goals'];
+const MOBILE_TABS: PageId[] = ['home', 'budget', 'debt', 'invest', 'goals', 'plan'];
 
 const readHash = (): PageId => {
   const id = location.hash.replace(/^#\/?/, '').split('?')[0];
@@ -141,11 +143,13 @@ function Shell({ passwordOn }: { passwordOn: boolean }) {
       }}
     />
   ) : page === 'debt' ? (
-    <Debt state={state} addDebt={() => setModal({ kind: 'account', defaultKind: 'card' })} editAccount={(account) => setModal({ kind: 'account', account })} />
+    <Debt state={state} go={go} addDebt={() => setModal({ kind: 'account', defaultKind: 'card' })} editAccount={(account) => setModal({ kind: 'account', account })} />
   ) : page === 'invest' ? (
     <Invest state={state} addAccount={() => setModal({ kind: 'account', defaultKind: 'brokerage' })} addHolding={() => setModal({ kind: 'holding' })} editHolding={(holding) => setModal({ kind: 'holding', holding })} />
   ) : page === 'goals' ? (
     <Goals state={state} addGoal={() => setModal({ kind: 'goal' })} editGoal={(goal) => setModal({ kind: 'goal', goal })} />
+  ) : page === 'plan' ? (
+    <Plan state={state} />
   ) : page === 'activity' ? (
     <Activity key={activityCategory ?? 'all'} state={state} initialCategory={activityCategory} onImport={() => setModal({ kind: 'import' })} onOpen={(tx) => setModal({ kind: 'tx', tx })} />
   ) : (
@@ -220,7 +224,7 @@ function Shell({ passwordOn }: { passwordOn: boolean }) {
 
         {/* Phone navigation */}
         <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-          <ul className="grid grid-cols-5">
+          <ul className="grid grid-cols-6">
             {MOBILE_TABS.map((id) => {
               const { label, Icon } = PAGES.find((p) => p.id === id)!;
               const active = page === id && state.hasData;

@@ -8,7 +8,7 @@ import { ChartFrame, LineChart, Meter } from '../components/charts';
 import { InsightList } from '../components/Insights';
 import { Amount, Button, Card, CardHeader, Empty, Segmented, cx } from '../components/ui';
 
-export function Debt({ state, addDebt, editAccount }: { state: AppState; addDebt: () => void; editAccount: (a: Account) => void }) {
+export function Debt({ state, go, addDebt, editAccount }: { state: AppState; go: (page: string) => void; addDebt: () => void; editAccount: (a: Account) => void }) {
   const refresh = useRefresh();
   const saved = state.settings;
   const [strategy, setStrategy] = useState<PayoffStrategy>(saved.strategy);
@@ -208,6 +208,19 @@ export function Debt({ state, addDebt, editAccount }: { state: AppState; addDebt
       </Card>
 
       <InsightList insights={state.insights} area={['debt']} limit={3} title="Debt suggestions" />
+
+      <Card className="flex flex-wrap items-center gap-2 p-4">
+        <p className="mr-auto text-sm text-ink-2">More ways to bring this down</p>
+        <Button size="sm" onClick={() => go('plan?tool=refinance')}>
+          Check a balance transfer or loan
+        </Button>
+        <Button size="sm" onClick={() => go('plan?tool=compare')}>
+          Debt or invest?
+        </Button>
+        <Button size="sm" onClick={() => go('plan?tool=windfall')}>
+          Plan a lump sum
+        </Button>
+      </Card>
 
       <Card>
         <CardHeader

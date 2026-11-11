@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { q, uid, nowIso, getSetting, setSetting, patchSettings } from '../db';
 import { categoryLabel, category, isEssential } from '../../shared/categories';
 import { simulatePayoff, addMonths, round2, type PayoffDebt } from '../../shared/payoff';
+import { compareRefinance } from '../../shared/planning';
 import type { AssetClass, Insight, InsightAction, Severity } from '../../shared/types';
 import { buildCore, HIGH_APR, type Core } from './state';
 
@@ -174,6 +175,18 @@ export function computeInsights({ state: s, txns }: Core): Draft[] {
       const lump = Math.min(roundTo(spare * 0.5, 100), worst.balance);
       add(`debt:lump:${worst.id}:${roundTo(lump, 500)}`, 'debt', 'info', `A ${usd(lump)} payment to ${worst.name} saves about ${usd((lump * worst.apr) / 100)} a year`,
         `You hold ${usd(s.totals.cash)} in cash, comfortably more than six weeks of essentials. Cash earns a few percent; this balance costs ${worst.apr}%. Half of the surplus would still leave ${usd(s.totals.cash - lump)} on hand.`);
+    }
+    // Expensive card debt that a typical 0% transfer offer would make meaningfully cheaper.
+    const pricey = s.debts.filter((d) => d.kind === 'Credit card' && d.apr >= 18);
+    const priceyTotal = pricey.reduce((t, d) => t + d.balance, 0);
+    if (priceyTotal >= 1500) {
+      const chosen = debts.filter((d) => pricey.some((x) => x.id === d.id));
+      const pay = chosen.reduce((t, d) => t + d.minPayment, 0) + extra;
+      const offer = compareRefinance(chosen, pay, { kind: 'transfer', feePct: 3, promoMonths: 15, promoApr: 0, afterApr: 25 });
+      if (offer.savings >= 250) {
+        add(`debt:transfer:${roundTo(priceyTotal, 1000)}`, 'debt', 'info', `A 0% balance transfer could save about ${usd(offer.savings)}`,
+          `Your ${pricey.length === 1 ? 'card' : `${pricey.length} cards`} carry ${usd(priceyTotal)} at ${pricey.length === 1 ? `${pricey[0].apr}%` : 'up to ' + Math.max(...pricey.map((d) => d.apr)) + '%'}. A typical offer (15 months at 0%, 3% fee) at your current ${usd(pay)} a month costs ${usd(offer.option.cost)} in total against ${usd(offer.current.cost)} if nothing changes. Approval depends on your credit; put a real offer's terms into Plan → Refinance before deciding.`);
+      }
     }
     if (s.totals.debtChange30d != null && s.totals.debtChange30d <= -100) {
       add(`debt:progress:${mk}`, 'debt', 'good', `Debt is down ${usd(s.totals.debtChange30d)} in 30 days`,
