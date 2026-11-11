@@ -3,7 +3,8 @@ import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { q, nowIso, isoDate, patchSettings, setSetting } from '../db';
 import { CATEGORIES, CATEGORY_IDS, categoryLabel } from '../../shared/categories';
-import { simulatePayoff, addMonths } from '../../shared/payoff';
+import { simulatePayoff, addMonths, type PayoffDebt } from '../../shared/payoff';
+import { allocateWindfall, compareRefinance, debtVsInvest, forecast, independenceNumber, monthReached } from '../../shared/planning';
 import type { InsightAction } from '../../shared/types';
 import { MODEL } from './ai-config';
 import { buildCore, buildState } from './state';
@@ -26,7 +27,7 @@ How to be useful here:
 - When they tell you facts about their finances (an account, a balance, a debt and its rate, a purchase, a holding), record them straight away with the write tools, then say in a line or two what you saved. Do not ask for confirmation first; they told you so that you would enter it. If a detail that changes the math is missing (a debt's APR or minimum payment, a goal's target), record what you have and ask for the missing piece afterwards.
 - When they paste or attach a statement, a list or a screenshot, extract every account, transaction or holding you can read from it and record them. Mention anything you could not read.
 - When they ask you to change a budget, the debt plan or a goal, make the change. When you want to recommend a change they have not asked for, explain it with the numbers and either ask, or file it with create_suggestion so it appears as a card they can apply with one tap.
-- Compare options with simulate_debt_payoff instead of reasoning about interest in your head.
+- Use the calculators instead of reasoning about interest or growth in your head: simulate_debt_payoff for payoff plans, plan_windfall for a lump sum, compare_debt_vs_invest for spare monthly money, evaluate_refinance for a balance transfer or consolidation loan, and forecast_net_worth for the long view. They run on this person's real balances and match what the Plan page of the app shows.
 - Sign conventions: transaction amounts are negative for money out and positive for money in. Credit card and loan balances are the amount owed, stored as positive numbers.
 
 How to write: this is a chat panel, often on a phone. Lead with the answer, keep replies short, use specific dollar amounts and dates, and write in plain language. Short paragraphs and the occasional brief list are fine; no tables or headings.
@@ -79,6 +80,9 @@ function overview() {
     using_demo_data: s.settings.demo,
   };
 }
+
+const payoffDebts = (debts: { id: string; name: string; balance: number; apr: number; min_payment: number }[]): PayoffDebt[] =>
+  debts.map((d) => ({ id: d.id, name: d.name, balance: d.balance, apr: d.apr, minPayment: d.min_payment }));
 
 interface RunContext {
   changed: boolean;
@@ -169,6 +173,79 @@ function tools(ctx: RunContext) {
           payoff_order: r.order.map((id) => ({ name: s.debts.find((d) => d.id === id)!.name, paid_off_month: r.payoffMonth[id] ? addMonths(s.today, r.payoffMonth[id]!) : null, interest: r.interestByDebt[id] })),
           minimum_does_not_cover_interest: r.underwater.map((id) => s.debts.find((d) => d.id === id)!.name),
         });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
+      name: 'plan_windfall',
+      description: 'Split a lump sum (bonus, tax refund, gift) in priority order: one-month cash cushion, debt at 8% APR or more by rate, full emergency fund, then investing. Returns each step and the interest and time it saves. Does not change anything.',
+      inputSchema: z.object({ amount: z.number().positive() }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        const plan = allocateWindfall({ amount: a.amount, cash: s.totals.cash, essentials: s.monthlyEssentials || 1000, emergencyMonths: s.settings.emergency_months, debts: payoffDebts(s.debts), strategy: s.settings.strategy, extra: s.settings.extra_payment });
+        return JSON.stringify({
+          steps: plan.steps.map(({ target, label, amount, note }) => ({ target, label, amount, note })),
+          to_debt: plan.toDebt,
+          interest_saved: plan.interestSaved,
+          debt_free_before: plan.monthsBefore != null ? addMonths(s.today, plan.monthsBefore) : null,
+          debt_free_after: plan.monthsAfter != null ? addMonths(s.today, plan.monthsAfter) : null,
+        });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
+      name: 'compare_debt_vs_invest',
+      description: 'Compare sending the same spare monthly amount to debt first versus investing it from day one, with equal total spending on both paths and freed payments invested once debt is gone. Returns where each path ends and the investment return at which they break even. Does not change anything.',
+      inputSchema: z.object({ monthly: z.number().positive(), annual_return_pct: z.number().min(0).max(20).describe('Expected investment return, e.g. 7'), years: z.number().int().min(1).max(40) }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        if (!s.debts.length) return 'No debts are recorded, so there is nothing to compare: spare money goes to the emergency fund and then investing.';
+        const r = debtVsInvest(payoffDebts(s.debts), s.settings.strategy, s.settings.extra_payment, a.monthly, a.annual_return_pct, a.years);
+        const m = a.years * 12;
+        const side = (p: typeof r.debtFirst) => ({ debt_free_month: p.debtFreeMonth != null ? addMonths(s.today, p.debtFreeMonth) : null, interest_paid: p.interestPaid, invested_at_end: p.invested[m], owed_at_end: p.debt[m], net_at_end: p.net[m] });
+        return JSON.stringify({ debt_first: side(r.debtFirst), invest_first: side(r.investFirst), debt_first_advantage: r.advantage, break_even_return_pct: r.breakEvenReturn });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
+      name: 'evaluate_refinance',
+      description: 'Compare carrying on with chosen debts against a 0% balance transfer or a fixed-term consolidation loan, counting interest and fees. Use the terms of the real offer when the user has one; otherwise say which typical terms you assumed. Does not change anything.',
+      inputSchema: z.object({
+        account_ids: z.array(z.string()).min(1).describe('Debt account ids from the overview'),
+        monthly_payment: z.number().positive().nullish().describe('What they pay toward these debts each month; defaults to minimums plus the plan extra'),
+        kind: z.enum(['transfer', 'loan']),
+        fee_pct: z.number().min(0).max(10).describe('Transfer fee or loan origination fee, e.g. 3'),
+        promo_months: z.number().int().min(1).max(36).nullish().describe('Transfer only: length of the 0% period'),
+        rate_after_pct: z.number().min(0).max(40).nullish().describe('Transfer only: APR once the promotion ends'),
+        loan_apr_pct: z.number().min(0).max(40).nullish().describe('Loan only'),
+        loan_term_months: z.number().int().min(6).max(120).nullish().describe('Loan only'),
+      }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        const chosen = payoffDebts(s.debts.filter((d) => a.account_ids.includes(d.id)));
+        if (!chosen.length) return 'None of those ids is a debt account. Use the ids listed under debts in the overview.';
+        const pay = a.monthly_payment ?? chosen.reduce((t, d) => t + d.minPayment, 0) + s.settings.extra_payment;
+        const r = compareRefinance(chosen, pay, a.kind === 'transfer'
+          ? { kind: 'transfer', feePct: a.fee_pct, promoMonths: a.promo_months ?? 15, promoApr: 0, afterApr: a.rate_after_pct ?? 25 }
+          : { kind: 'loan', apr: a.loan_apr_pct ?? 12, termMonths: a.loan_term_months ?? 36, feePct: a.fee_pct });
+        return JSON.stringify({ balance: r.balance, keep_as_is: r.current, refinanced: r.option, savings: r.savings, monthly_needed_to_clear_in_promo: r.neededForPromo, clears_in_promo: r.clearsInPromo });
+      }),
+      ...eager,
+    }),
+    betaZodTool({
+      name: 'forecast_net_worth',
+      description: "Project net worth, investments and debt forward under the current debt plan. Use an after-inflation return so figures are in today's dollars. Returns yearly checkpoints and when investments would reach 25 times annual spending. Does not change anything.",
+      inputSchema: z.object({ monthly_invest: z.number().min(0), annual_return_pct: z.number().min(0).max(15).describe('After inflation, e.g. 5'), years: z.number().int().min(1).max(50), reinvest_freed_payments: z.boolean().nullish().describe('Keep paying the same amount into investments once debts are gone; default true') }),
+      run: safe((a) => {
+        const { state: s } = buildCore();
+        const goalMoney = s.goals.filter((g) => g.progress < g.target_amount).reduce((t, g) => t + g.monthly_contribution, 0);
+        const f = forecast({ debts: payoffDebts(s.debts), strategy: s.settings.strategy, extra: s.settings.extra_payment, cash: s.totals.cash, investments: s.totals.investments, otherAssets: s.totals.otherAssets, monthlySave: goalMoney, monthlyInvest: a.monthly_invest, annualReturn: a.annual_return_pct, years: a.years, rollover: a.reinvest_freed_payments ?? true });
+        const target = independenceNumber(s.monthlySpendAvg);
+        const hit = target > 0 ? monthReached(f.invested, target) : null;
+        const step = a.years <= 10 ? 1 : 5;
+        const checkpoints = [];
+        for (let y = 0; y <= a.years; y += step) checkpoints.push({ year: addMonths(s.today, y * 12).slice(0, 4), net_worth: f.net[y * 12], invested: f.invested[y * 12], debt: f.debt[y * 12] });
+        return JSON.stringify({ assumes_monthly_to_goals: goalMoney, debt_free_month: f.debtFreeMonth != null ? addMonths(s.today, f.debtFreeMonth) : null, checkpoints, final_net_worth: f.net[a.years * 12], independence_target: target, independence_reached: hit != null ? addMonths(s.today, hit) : `not within ${a.years} years` });
       }),
       ...eager,
     }),
@@ -303,6 +380,10 @@ const TOOL_LABEL: Record<string, string> = {
   search_transactions: 'Searching transactions',
   get_spending_breakdown: 'Adding up spending',
   simulate_debt_payoff: 'Running payoff scenarios',
+  plan_windfall: 'Planning the lump sum',
+  compare_debt_vs_invest: 'Comparing debt and investing',
+  evaluate_refinance: 'Pricing the refinance',
+  forecast_net_worth: 'Projecting your net worth',
   save_accounts: 'Saving accounts',
   add_transactions: 'Recording transactions',
   set_budgets: 'Updating budget',

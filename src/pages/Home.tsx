@@ -87,7 +87,7 @@ function Brief({ state }: { state: AppState }) {
   );
 }
 
-function NextDollar({ state }: { state: AppState }) {
+function NextDollar({ state, go }: { state: AppState; go: (page: string) => void }) {
   const nd = state.nextDollar;
   if (!nd) return null;
   return (
@@ -116,6 +116,9 @@ function NextDollar({ state }: { state: AppState }) {
           </li>
         ))}
       </ol>
+      <button onClick={() => go('plan?tool=windfall')} className="mt-4 text-[13px] font-medium text-accent-ink hover:underline">
+        Got a lump sum? See exactly where it should go
+      </button>
     </Card>
   );
 }
@@ -174,7 +177,7 @@ export function Home({ state, go }: { state: AppState; go: (page: string) => voi
         </div>
         <div className="space-y-4 lg:col-span-4">
           <Brief state={state} />
-          <NextDollar state={state} />
+          <NextDollar state={state} go={go} />
         </div>
       </div>
 

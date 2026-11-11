@@ -1,13 +1,14 @@
 import { q, getSettings, getSetting, isoDate } from '../db';
 import { CATEGORIES, isSpend, isEssential } from '../../shared/categories';
 import { estimateMinPayment, round2 } from '../../shared/payoff';
+import { HIGH_APR } from '../../shared/planning';
 import type { Account, AppState, BudgetLine, DebtView, Goal, Holding, Insight, MonthFlow, NextDollar, Transaction } from '../../shared/types';
 import { plaidConfigured, plaidEnv } from './plaid';
 import { aiConfigured, MODEL } from './ai-config';
 
 /** Categories that are bills rather than day-to-day choices; left out of "safe to spend". */
 const FIXED = new Set(['housing', 'utilities', 'insurance', 'debt_payment', 'subscriptions', 'fees']);
-export const HIGH_APR = 8;
+export { HIGH_APR };
 
 export interface TxRow {
   id: string;

@@ -17,6 +17,7 @@ It runs on your own computer, stores everything in a local file, and works in th
 - **Debt** — every card and loan in payoff order, your debt-free date, and a live planner: move the extra-payment slider, switch between highest-rate-first and smallest-balance-first, or try a lump sum, and the projection updates as you drag.
 - **Invest** — holdings across accounts, allocation against a target mix you set, gain on cost, and price refresh for tickers.
 - **Goals** — savings goals with projected finish dates. Link a goal to an account and it tracks itself.
+- **Plan** — four calculators that run on your real balances: where a windfall should go, whether spare money does more against debt or invested, whether a 0% balance transfer or consolidation loan would save money, and a long-range net worth forecast.
 - **Activity** — every transaction, searchable and filterable, with one-line quick entry.
 - **Assistant** — a chat panel backed by Claude that can read everything in the app, run the numbers, and make changes when you ask. It also writes the home-screen briefing and files its own suggestions.
 
@@ -80,6 +81,21 @@ With the assistant enabled, Claude also reviews the picture after changes (at mo
 
 **Your next spare dollar** follows a common ordering: a one-month cushion, then debt at 8% APR or more, then a full emergency fund, then investing and goals.
 
+## Planning tools
+
+![Plan page](docs/plan.png)
+
+The **Plan** page answers "what if" questions with your own numbers. Everything recalculates as you move a slider, and nothing changes your data.
+
+- **Windfall.** Enter a bonus, refund or any lump sum. It is split in the same order as *your next spare dollar*, and you see each step, the interest it saves, and how much sooner you are debt-free.
+- **Debt or invest.** Pick a monthly amount, an expected return and a horizon. Both paths spend the same each month, and payments freed by a cleared debt are invested. You get where each path ends and the return investing would need to break even.
+- **Refinance.** Choose balances and compare carrying on as you are with a 0% balance transfer (fee, promo length, rate after) or a consolidation loan (rate, term, fee), counting interest and fees. For a transfer it also shows the monthly payment that clears the balance before the promotional rate ends.
+- **Forecast.** Net worth 10, 20 or 30 years out under your current debt plan, at an after-inflation return so figures are in today's dollars, with a cautious and an optimistic line two points either side. It also shows when you become debt-free and when investments would reach 25 times a year's spending.
+
+The strip of figures on that page shows what your debt costs per day, your balance-weighted rate, how many months of essentials your cash covers, and the share of income you keep.
+
+The assistant can run the same four calculators, so "I got a $2,000 bonus, what should I do?" is answered from the same maths the page shows. The monitor also flags when a typical 0% transfer offer would save a meaningful amount on your card balances.
+
 ## Using it on your phone
 
 By default Keel only answers on the computer it runs on. To reach it from a phone on the same Wi-Fi, set both of these in `.env` and restart:
@@ -102,7 +118,7 @@ The app is installable (Add to Home Screen) and laid out for small screens. Full
 
 ## What has and has not been verified
 
-Checked in a real browser at desktop and phone sizes, in light and dark themes: adding accounts by hand, sample data, quick add, applying suggestions, the live debt planner, chart tooltips and table views, in-place budget edits, goals, search and category rules, CSV import, the target-mix editor, live updates across two open tabs, the password gate and the network guard. `npm test` covers the payoff maths, entry parsing, categorisation, the monitor rules, de-duplication, CSV parsing, and the assistant's tool loop.
+Checked in a real browser at desktop and phone sizes, in light and dark themes: adding accounts by hand, sample data, quick add, applying suggestions, the live debt planner, chart tooltips and table views, in-place budget edits, goals, search and category rules, CSV import, the target-mix editor, the four planning tools, live updates across two open tabs, the password gate and the network guard. `npm test` covers the payoff maths, the planning calculators, entry parsing, categorisation, the monitor rules, de-duplication, CSV parsing, and the assistant's tool loop.
 
 Not exercised against the live services, because the environment this was built in had no credentials for them and could not reach some of them:
 

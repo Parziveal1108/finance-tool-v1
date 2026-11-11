@@ -141,6 +141,52 @@ describe('assistant', () => {
     expect(JSON.stringify(requests[0].body.messages.at(-1).content)).toContain('what do I owe?');
   });
 
+  it('runs the planning calculators on the stored balances', async () => {
+    const { chat } = await import('../server/lib/agent');
+    const { q } = await import('../server/db');
+    const visa = q.get<{ id: string }>("SELECT id FROM accounts WHERE name = 'Travel Visa'")!;
+    requests.length = 0;
+    script = [
+      () => [
+        { type: 'tool_use', id: 'toolu_a', name: 'plan_windfall', input: { amount: 2000 } },
+        { type: 'tool_use', id: 'toolu_b', name: 'evaluate_refinance', input: { account_ids: [visa.id], monthly_payment: 400, kind: 'transfer', fee_pct: 3, promo_months: 15, rate_after_pct: 25 } },
+        { type: 'tool_use', id: 'toolu_c', name: 'compare_debt_vs_invest', input: { monthly: 200, annual_return_pct: 7, years: 10 } },
+        { type: 'tool_use', id: 'toolu_d', name: 'forecast_net_worth', input: { monthly_invest: 300, annual_return_pct: 5, years: 10 } },
+      ],
+      () => [{ type: 'text', text: 'Here is the plan.' }],
+    ];
+    const events: any[] = [];
+    await chat('I got a $2,000 bonus, what should I do?', [], (e) => events.push(e));
+    expect(events.at(-1)).toEqual({ type: 'done', changed: false }); // calculators never write
+
+    const results = new Map<string, any>(requests[1].body.messages.at(-1).content.filter((b: any) => b.type === 'tool_result').map((b: any) => [b.tool_use_id, b]));
+    expect(results.size).toBe(4);
+    const parse = (id: string) => {
+      const r = results.get(id);
+      expect(r.is_error).toBeFalsy();
+      return JSON.parse(typeof r.content === 'string' ? r.content : r.content[0].text);
+    };
+    // No cash and no spending history: $1,000 default cushion first, the rest to the 24.99% card.
+    const windfall = parse('toolu_a');
+    expect(windfall.steps.map((x: any) => [x.target, x.amount])).toEqual([['cushion', 1000], ['debt', 1000]]);
+    expect(windfall.interest_saved).toBeGreaterThan(0);
+
+    const refi = parse('toolu_b');
+    expect(refi.balance).toBe(4200);
+    expect(refi.refinanced.fee).toBe(126);
+    expect(refi.clears_in_promo).toBe(true);
+    expect(refi.savings).toBeCloseTo(refi.keep_as_is.cost - 126, 2);
+
+    const versus = parse('toolu_c');
+    expect(versus.debt_first_advantage).toBeGreaterThan(0);
+    expect(versus.break_even_return_pct).toBeGreaterThan(15);
+
+    const outlook = parse('toolu_d');
+    expect(outlook.checkpoints).toHaveLength(11);
+    expect(outlook.checkpoints[0].debt).toBe(4200);
+    expect(outlook.final_net_worth).toBeGreaterThan(outlook.checkpoints[0].net_worth);
+  });
+
   it('reports API failures in plain words and keeps the conversation clean', async () => {
     const { chat } = await import('../server/lib/agent');
     const { q } = await import('../server/db');

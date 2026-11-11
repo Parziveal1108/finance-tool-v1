@@ -23,6 +23,8 @@ export interface PayoffResult {
   order: string[];
   /** Debts whose minimum payment does not cover a month's interest. */
   underwater: string[];
+  /** Total paid toward debt in month 1, 2, 3 … (excludes any lump sum). */
+  payments: number[];
 }
 
 const HORIZON = 600; // 50 years
@@ -79,6 +81,7 @@ export function simulatePayoff(
   if (lumpSum > 0) totalPaid += lumpSum - payDown(lumpSum);
 
   const timeline = [round2(total())];
+  const payments: number[] = [];
   let months: number | null = total() <= 0.005 ? 0 : null;
 
   for (let m = 1; m <= HORIZON && months === null; m++) {
@@ -96,7 +99,9 @@ export function simulatePayoff(
       totalPaid += pay;
       bal.set(d.id, b);
     }
-    totalPaid += pool - payDown(pool);
+    const leftover = payDown(pool);
+    totalPaid += pool - leftover;
+    payments.push(round2(committed - leftover));
     for (const d of order) {
       if (payoffMonth[d.id] === null && bal.get(d.id)! <= 0.005) payoffMonth[d.id] = m;
     }
@@ -114,6 +119,7 @@ export function simulatePayoff(
     interestByDebt: Object.fromEntries(Object.entries(interestByDebt).map(([k, v]) => [k, round2(v)])),
     order: order.map((d) => d.id),
     underwater,
+    payments,
   };
 }
 
