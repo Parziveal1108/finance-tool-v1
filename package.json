@@ -1,0 +1,47 @@
+{
+  "name": "keel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Personal budget, debt payoff, investments and savings with a built-in monitoring assistant.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"tsx watch --clear-screen=false server/index.ts\" \"vite\"",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@tanstack/react-query": "^5.107.1",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "lucide-react": "^1.71.0",
+    "papaparse": "^5.7.0",
+    "plaid": "^51.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-plaid-link": "^5.0.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}
