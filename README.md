@@ -17,7 +17,7 @@ It runs on your own computer, stores everything in a local file, and works in th
 - **Debt** — every card and loan in payoff order, your debt-free date, and a live planner: move the extra-payment slider, switch between highest-rate-first and smallest-balance-first, or try a lump sum, and the projection updates as you drag.
 - **Invest** — holdings across accounts, allocation against a target mix you set, gain on cost, and price refresh for tickers.
 - **Goals** — savings goals with projected finish dates. Link a goal to an account and it tracks itself.
-- **Plan** — four calculators that run on your real balances: where a windfall should go, whether spare money does more against debt or invested, whether a 0% balance transfer or consolidation loan would save money, and a long-range net worth forecast.
+- **Plan** — nine calculators that run on your real balances. Money: windfall, debt or invest, refinance, forecast, employer match, paychecks. Housing: renting, owning, and rent or buy.
 - **Activity** — every transaction, searchable and filterable, with one-line quick entry.
 - **Assistant** — a chat panel backed by Claude that can read everything in the app, run the numbers, and make changes when you ask. It also writes the home-screen briefing and files its own suggestions.
 
@@ -74,12 +74,15 @@ The built-in checks need no AI and no network:
 - **Debt:** a minimum payment that does not cover the interest, high card utilisation, payments due soon, how much sooner a larger extra payment gets you out of debt, when highest-rate-first would be cheaper, idle cash that would do more against an expensive balance.
 - **Savings:** emergency fund coverage in months, goals falling behind their target date, goals reached.
 - **Investments:** drift from your target mix, a single holding making up a fifth or more of the portfolio, uninvested cash.
+- **Employer match:** match you are not collecting, with what it costs per paycheck to collect it.
+- **Paychecks:** an upcoming month with an extra paycheck that your monthly budget has not assigned.
+- **Housing:** housing taking 40% or more of take-home pay.
 
 Where a finding has an obvious fix, the card carries a button that makes the change. Dismissed suggestions stay dismissed; ones whose cause goes away disappear on their own.
 
 With the assistant enabled, Claude also reviews the picture after changes (at most every six hours), adds suggestions the fixed rules would miss, and writes the briefing at the top of the home screen.
 
-**Your next spare dollar** follows a common ordering: a one-month cushion, then debt at 8% APR or more, then a full emergency fund, then investing and goals.
+**Your next spare dollar** follows a common ordering: a one-month cushion, then the full employer match, then debt at 8% APR or more, then a full emergency fund, then investing and goals. The match comes before debt because it is an immediate return (50% by default) that no payoff beats; set the rate to 0 under Plan → Employer match if you have none.
 
 ## Planning tools
 
@@ -92,9 +95,24 @@ The **Plan** page answers "what if" questions with your own numbers. Everything 
 - **Refinance.** Choose balances and compare carrying on as you are with a 0% balance transfer (fee, promo length, rate after) or a consolidation loan (rate, term, fee), counting interest and fees. For a transfer it also shows the monthly payment that clears the balance before the promotional rate ends.
 - **Forecast.** Net worth 10, 20 or 30 years out under your current debt plan, at an after-inflation return so figures are in today's dollars, with a cautious and an optimistic line two points either side. It also shows when you become debt-free and when investments would reach 25 times a year's spending.
 
-The strip of figures on that page shows what your debt costs per day, your balance-weighted rate, how many months of essentials your cash covers, and the share of income you keep.
+- **Employer match.** Enter your gross pay, what you contribute, the match rate and its limit. It shows what your employer adds now and at full match, any amount going unclaimed, what collecting it costs per paycheck, and what the match alone grows to.
+- **Paychecks.** Your pay schedule (read from your deposits, or entered) turned into a per-paycheck split of spending, debt payments and goals. It lists the months with an extra paycheck, groups upcoming recurring bills by the paycheck that covers them, and for biweekly pay shows what paying debt every payday saves, with a button to add it to your plan.
 
-The assistant can run the same four calculators, so "I got a $2,000 bonus, what should I do?" is answered from the same maths the page shows. The monitor also flags when a typical 0% transfer offer would save a meaningful amount on your card balances.
+### Housing
+
+![Mortgage interest invested against home equity](docs/housing.png)
+
+The three housing tools share one scenario, which is saved as you type.
+
+- **Renting.** What rent costs over the years as it rises, the share of your pay it takes, and what a cheaper or pricier place would do to your debt-free date and to money you could invest.
+- **Owning.** The full monthly cost itemised (mortgage, tax, insurance, upkeep, HOA, PMI), the cash needed to get in against the cash you have and your emergency fund, the 28/36 lender ratios with and without your current debts, and how each period's payments split between interest and principal. One tap turns the cash target into a savings goal.
+- **Rent or buy.** Both paths with equal spending: whoever has the cheaper month invests the difference, and the renter invests the down payment and closing costs. It shows what each path leaves you with, the first year buying is ahead, and a separate view of your mortgage interest: what you would pay, what those dollars would have grown to if invested as you paid them, and the equity built from principal and from the price rising.
+
+The housing figures leave out income tax effects, and the defaults (rate, property tax, insurance, upkeep) are placeholders to replace with a real quote or listing.
+
+The strip of figures on the Plan page shows what your debt costs per day, your balance-weighted rate, how many months of essentials your cash covers, and the share of income you keep.
+
+The assistant can run the same calculators, so "I got a $2,000 bonus, what should I do?" or "should I buy a $300k house or keep renting at $1,600?" is answered from the same maths the page shows. Tell it your pay, your employer match or a home you are considering and it saves them for you. The monitor also flags when a typical 0% transfer offer would save a meaningful amount on your card balances.
 
 ## Using it on your phone
 
@@ -118,7 +136,7 @@ The app is installable (Add to Home Screen) and laid out for small screens. Full
 
 ## What has and has not been verified
 
-Checked in a real browser at desktop and phone sizes, in light and dark themes: adding accounts by hand, sample data, quick add, applying suggestions, the live debt planner, chart tooltips and table views, in-place budget edits, goals, search and category rules, CSV import, the target-mix editor, the four planning tools, live updates across two open tabs, the password gate and the network guard. `npm test` covers the payoff maths, the planning calculators, entry parsing, categorisation, the monitor rules, de-duplication, CSV parsing, and the assistant's tool loop.
+Checked in a real browser at desktop and phone sizes, in light and dark themes: adding accounts by hand, sample data, quick add, applying suggestions, the live debt planner, chart tooltips and table views, in-place budget edits, goals, search and category rules, CSV import, the target-mix editor, the planning and housing tools, live updates across two open tabs, the password gate and the network guard. `npm test` covers the payoff maths, the planning, housing and paycheck calculators, entry parsing, categorisation, the monitor rules, de-duplication, CSV parsing, and the assistant's tool loop.
 
 Not exercised against the live services, because the environment this was built in had no credentials for them and could not reach some of them:
 

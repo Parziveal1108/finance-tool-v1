@@ -1,60 +1,31 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AppState } from '../../shared/types';
 import { addMonths, type PayoffDebt } from '../../shared/payoff';
 import { allocateWindfall, compareRefinance, dailyInterest, debtVsInvest, forecast, independenceNumber, monthReached, weightedApr, type RefinanceOption, type WindfallStep } from '../../shared/planning';
 import { monthYear, monthsToWords, usd, usd2, usdCompact, useCountUp } from '../lib/format';
 import { ChartFrame, LineChart, SegmentedBar } from '../components/charts';
 import { Amount, Card, Field, Segmented, Slider, cx } from '../components/ui';
+import { Rows, Verdict, num, when } from './plan/common';
+import { Owning, RentOrBuy, Renting, useScenario } from './plan/Housing';
+import { Match, Paychecks } from './plan/Pay';
 
-type Tool = 'windfall' | 'compare' | 'refinance' | 'forecast';
-const TOOLS: { id: Tool; label: string; blurb: string }[] = [
-  { id: 'windfall', label: 'Windfall', blurb: 'Where a bonus, refund or other lump sum does the most good.' },
-  { id: 'compare', label: 'Debt or invest', blurb: 'The same spare money each month, sent to debt first or invested from day one.' },
-  { id: 'refinance', label: 'Refinance', blurb: 'Whether a 0% balance transfer or a consolidation loan would actually save you money.' },
-  { id: 'forecast', label: 'Forecast', blurb: 'Where your current plan leads over the next decades, in today\'s dollars.' },
+type Tool = 'windfall' | 'compare' | 'refinance' | 'forecast' | 'match' | 'paychecks' | 'renting' | 'owning' | 'rentbuy';
+const TOOLS: { id: Tool; label: string; group: 'Money' | 'Housing'; blurb: string }[] = [
+  { id: 'windfall', group: 'Money', label: 'Windfall', blurb: 'Where a bonus, refund or other lump sum does the most good.' },
+  { id: 'compare', group: 'Money', label: 'Debt or invest', blurb: 'The same spare money each month, sent to debt first or invested from day one.' },
+  { id: 'refinance', group: 'Money', label: 'Refinance', blurb: 'Whether a 0% balance transfer or a consolidation loan would actually save you money.' },
+  { id: 'forecast', group: 'Money', label: 'Forecast', blurb: "Where your current plan leads over the next decades, in today's dollars." },
+  { id: 'match', group: 'Money', label: 'Employer match', blurb: 'Whether you are collecting everything your employer will add to your retirement savings.' },
+  { id: 'paychecks', group: 'Money', label: 'Paychecks', blurb: 'Your pay schedule turned into a per-paycheck plan, with the extra checks and upcoming bills called out.' },
+  { id: 'renting', group: 'Housing', label: 'Renting', blurb: 'What your rent costs now and as it rises, and what a cheaper or pricier place would do to your plans.' },
+  { id: 'owning', group: 'Housing', label: 'Owning', blurb: 'The full monthly cost of a home, the cash it takes to get in, and what your income and debts support.' },
+  { id: 'rentbuy', group: 'Housing', label: 'Rent or buy', blurb: 'Both paths with equal spending, including how your mortgage interest would have grown if invested instead.' },
 ];
 
 const readTool = (): Tool => {
-  const q = location.hash.split('?')[1] ?? '';
-  const t = new URLSearchParams(q).get('tool');
+  const t = new URLSearchParams(location.hash.split('?')[1] ?? '').get('tool');
   return (TOOLS.find((x) => x.id === t)?.id ?? 'windfall') as Tool;
 };
-
-const num = (s: string) => Math.max(0, Number(s) || 0);
-const when = (state: AppState, months: number | null) => (months == null ? 'Never at this pace' : months === 0 ? 'Now' : monthYear(addMonths(state.today, months)));
-
-function Rows({ head, rows }: { head: [string, string, string]; rows: [string, ReactNode, ReactNode][] }) {
-  return (
-    <table className="tabular w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-muted">
-          <th className="pb-1.5 font-medium">{head[0]}</th>
-          <th className="pb-1.5 text-right font-medium">{head[1]}</th>
-          <th className="pb-1.5 text-right font-medium">{head[2]}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, a, b]) => (
-          <tr key={label} className="border-t border-line">
-            <td className="py-2 text-ink-2">{label}</td>
-            <td className="py-2 text-right font-medium">{a}</td>
-            <td className="py-2 text-right font-medium">{b}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function Verdict({ label, value, children }: { label: string; value: string; children?: ReactNode }) {
-  return (
-    <div>
-      <p className="text-[13px] font-medium text-ink-2">{label}</p>
-      <p className="mt-1 text-[40px] font-semibold leading-none tracking-tight sm:text-5xl">{value}</p>
-      {children && <div className="mt-2 text-sm leading-relaxed text-ink-2">{children}</div>}
-    </div>
-  );
-}
 
 // --- Windfall -------------------------------------------------------------------------------
 
@@ -62,7 +33,7 @@ const STEP_COLOR: Record<WindfallStep['target'], string> = { cushion: 'var(--s3)
 const STEP_NAME: Record<WindfallStep['target'], string> = { cushion: 'Cushion', debt: 'Debt', emergency: 'Emergency fund', invest: 'Invest' };
 
 function Windfall({ state, debts }: { state: AppState; debts: PayoffDebt[] }) {
-  const [amount, setAmount] = useState('1000');
+  const [amount, setAmount] = useState(() => new URLSearchParams(location.hash.split('?')[1] ?? '').get('amount') || '1000');
   const value = num(amount);
   const plan = useMemo(
     () => allocateWindfall({ amount: value, cash: state.totals.cash, essentials: state.monthlyEssentials || 1000, emergencyMonths: state.settings.emergency_months, debts, strategy: state.settings.strategy, extra: state.settings.extra_payment }),
@@ -187,7 +158,11 @@ function Compare({ state, debts }: { state: AppState; debts: PayoffDebt[] }) {
               ]}
             />
           </div>
-          <p className="mt-4 rounded-xl bg-sunken px-3 py-2 text-[13px] text-ink-2">One exception either way: if your employer matches retirement contributions, take the full match first. That is an immediate return no payoff can beat.</p>
+          {state.settings.match.rate > 0 && (
+            <p className="mt-4 rounded-xl bg-sunken px-3 py-2 text-[13px] text-ink-2">
+              One exception either way: your employer's {state.settings.match.rate}% match. Contributions up to the match limit earn {state.settings.match.rate}% the day they go in, which no payoff can beat, so take all of it before sending extra to debt. The Employer match tab checks whether you are.
+            </p>
+          )}
         </Card>
         <Card>
           <ChartFrame
@@ -456,6 +431,7 @@ export function Plan({ state }: { state: AppState }) {
     history.replaceState(null, '', `#/plan?tool=${t}`);
   };
   const debts: PayoffDebt[] = useMemo(() => state.debts.map((d) => ({ id: d.id, name: d.name, balance: d.balance, apr: d.apr, minPayment: d.min_payment })), [state.debts]);
+  const [scn, setScn] = useScenario(state);
   const perDay = dailyInterest(debts);
   const runway = state.monthlyEssentials > 0 ? state.totals.cash / state.monthlyEssentials : null;
   const kept = state.monthlyIncomeAvg > 0 ? (state.monthlyIncomeAvg - state.monthlySpendAvg) / state.monthlyIncomeAvg : null;
@@ -478,14 +454,21 @@ export function Plan({ state }: { state: AppState }) {
         <Stat label="You keep" value={kept != null ? `${Math.round(kept * 100)}%` : '—'} note={kept != null ? `of income in a typical month, about ${usd(state.monthlyIncomeAvg - state.monthlySpendAvg)}` : 'Needs income history'} />
       </div>
 
-      <div className="scroll-quiet -mx-4 overflow-x-auto px-4 lg:mx-0 lg:px-0">
-        <div role="tablist" aria-label="Planning tools" className="inline-flex rounded-xl border border-edge bg-sunken p-0.5">
-          {TOOLS.map((t) => (
-            <button key={t.id} role="tab" aria-selected={tool === t.id} onClick={() => setTool(t.id)} className={cx('h-9 whitespace-nowrap rounded-[10px] px-3 text-sm font-medium transition sm:px-4', tool === t.id ? 'bg-raised text-ink shadow-sm' : 'text-ink-2 hover:text-ink')}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="space-y-2">
+        {(['Money', 'Housing'] as const).map((group) => (
+          <div key={group} className="flex items-center gap-3">
+            <span className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-muted">{group}</span>
+            <div className="scroll-quiet -mr-4 min-w-0 flex-1 overflow-x-auto pr-4 lg:mr-0 lg:pr-0">
+              <div role="tablist" aria-label={`${group} tools`} className="inline-flex rounded-xl border border-edge bg-sunken p-0.5">
+                {TOOLS.filter((t) => t.group === group).map((t) => (
+                  <button key={t.id} role="tab" aria-selected={tool === t.id} onClick={() => setTool(t.id)} className={cx('h-9 whitespace-nowrap rounded-[10px] px-3 text-sm font-medium transition sm:px-4', tool === t.id ? 'bg-raised text-ink shadow-sm' : 'text-ink-2 hover:text-ink')}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
       <p className="px-1 text-sm text-ink-2">{active.blurb}</p>
 
@@ -493,6 +476,11 @@ export function Plan({ state }: { state: AppState }) {
       {tool === 'compare' && <Compare state={state} debts={debts} />}
       {tool === 'refinance' && <Refinance state={state} debts={debts} />}
       {tool === 'forecast' && <ForecastTool state={state} debts={debts} />}
+      {tool === 'match' && <Match state={state} debts={debts} />}
+      {tool === 'paychecks' && <Paychecks state={state} debts={debts} />}
+      {tool === 'renting' && <Renting state={state} debts={debts} scn={scn} set={setScn} />}
+      {tool === 'owning' && <Owning state={state} debts={debts} scn={scn} set={setScn} />}
+      {tool === 'rentbuy' && <RentOrBuy state={state} scn={scn} set={setScn} />}
     </div>
   );
 }

@@ -61,6 +61,10 @@ export function loadDemo(now = new Date()) {
   const shops = ['Amazon', 'Target', 'IKEA', 'Nike', 'Best Buy', 'Etsy'];
   const fun = ['AMC Theaters', 'Steam', 'Ticketmaster', 'City Museum'];
 
+  // Paid every other Friday, so some months carry three paychecks.
+  const sinceFriday = (now.getDay() + 2) % 7;
+  for (let off = sinceFriday; off < 215; off += 14) tx(off, 'Payroll Direct Deposit - Brightline Inc', 2455.12, checking, 'income');
+
   const monthsBack = 6;
   for (let m = monthsBack; m >= 0; m--) {
     // Day offsets for a given day-of-month in the month `m` months ago.
@@ -71,8 +75,6 @@ export function loadDemo(now = new Date()) {
     const dim = new Date(now.getFullYear(), now.getMonth() - m + 1, 0).getDate();
     const latest = m === 0;
 
-    tx(at(1), 'Payroll Direct Deposit - Brightline Inc', 2455.12, checking, 'income');
-    tx(at(15), 'Payroll Direct Deposit - Brightline Inc', 2455.12, checking, 'income');
     tx(at(1), 'Parkview Apartments Rent', -1450, checking, 'housing');
     tx(at(3), 'City Electric & Gas', -between(78, 132), checking, 'utilities');
     tx(at(6), 'Xfinity Internet', -65, checking, 'utilities');
@@ -126,6 +128,6 @@ export function loadDemo(now = new Date()) {
     const wobble = Math.sin(d / 9) * 420 + Math.sin(d / 23) * 900 + (rand() - 0.5) * 260;
     q.run('INSERT OR REPLACE INTO snapshots (date, assets, debt) VALUES (?, ?, ?)', day(d), Math.round((assets - d * 31 + wobble * (d / 182 + 0.25)) * 100) / 100, Math.round((debt + d * 14.5 + Math.sin(d / 15) * 180) * 100) / 100);
   }
-  patchSettings({ demo: true, default_account_id: checking, strategy: 'avalanche', extra_payment: 100, target_allocation: { us_stock: 55, intl_stock: 25, bond: 15, cash: 5 } });
+  patchSettings({ demo: true, default_account_id: checking, strategy: 'avalanche', extra_payment: 100, target_allocation: { us_stock: 55, intl_stock: 25, bond: 15, cash: 5 }, match: { rate: 50, limit_pct: 6, salary: 84000, contributing_pct: 4 } });
   return today;
 }

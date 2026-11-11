@@ -187,6 +187,37 @@ describe('assistant', () => {
     expect(outlook.final_net_worth).toBeGreaterThan(outlook.checkpoints[0].net_worth);
   });
 
+  it('saves profile facts and analyses a housing scenario', async () => {
+    const { chat } = await import('../server/lib/agent');
+    const { getSettings } = await import('../server/db');
+    requests.length = 0;
+    script = [
+      () => [{ type: 'tool_use', id: 'toolu_p', name: 'save_profile', input: { pay: { frequency: 'biweekly', amount: 2400 }, match: { rate: 50, limit_pct: 6, salary: 80000, contributing_pct: 3 }, housing: { price: 300000, down_pct: 20, rate: 6, rent: 1600 } } }],
+      () => [{ type: 'tool_use', id: 'toolu_h', name: 'analyze_housing', input: { scenario: { years: 7 } } }],
+      () => [{ type: 'text', text: 'Saved, and here is how it compares.' }],
+    ];
+    const events: any[] = [];
+    await chat('I am paid 2400 biweekly, 50% match up to 6% on 80k and I put in 3%. Thinking about a 300k house vs my 1600 rent.', [], (e) => events.push(e));
+    expect(events.at(-1)).toEqual({ type: 'done', changed: true });
+
+    const s = getSettings();
+    expect(s.pay).toEqual({ frequency: 'biweekly', amount: 2400, anchor: null });
+    expect(s.match).toEqual({ rate: 50, limit_pct: 6, salary: 80000, contributing_pct: 3 });
+    expect(s.housing).toMatchObject({ price: 300000, down_pct: 20, rate: 6, rent: 1600, term_years: 30 });
+
+    const result = requests[2].body.messages.at(-1).content.find((b: any) => b.type === 'tool_result');
+    expect(result.is_error).toBeFalsy();
+    const h = JSON.parse(typeof result.content === 'string' ? result.content : result.content[0].text);
+    expect(h.scenario_used).toMatchObject({ price: 300000, rent: 1600, years: 7, gross_income: 80000 });
+    expect(h.owning.cash_needed).toEqual({ down: 60000, closing: 9000, total: 69000, loan: 240000 });
+    expect(h.owning.monthly_cost_first_year.pi).toBeCloseTo(1438.92, 2);
+    expect(h.affordability.gross_monthly).toBe(6667);
+    expect(h.comparison.horizon_years).toBe(7);
+    expect(h.comparison.by_year.at(-1).year).toBe(7);
+    expect(h.interest_vs_equity.interest_if_invested_instead).toBeGreaterThan(h.interest_vs_equity.interest_paid);
+    expect(h.interest_vs_equity.equity_from_down_payment_and_principal + h.interest_vs_equity.equity_from_appreciation).toBeCloseTo(h.interest_vs_equity.total_equity_before_selling_costs, 0);
+  });
+
   it('reports API failures in plain words and keeps the conversation clean', async () => {
     const { chat } = await import('../server/lib/agent');
     const { q } = await import('../server/db');

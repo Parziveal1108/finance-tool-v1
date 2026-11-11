@@ -2,6 +2,7 @@ import { q, getSettings, getSetting, isoDate } from '../db';
 import { CATEGORIES, isSpend, isEssential } from '../../shared/categories';
 import { estimateMinPayment, round2 } from '../../shared/payoff';
 import { HIGH_APR } from '../../shared/planning';
+import { detectPay, matchSummary, nextPaydays, paychecksPerYear } from '../../shared/paycheck';
 import type { Account, AppState, BudgetLine, DebtView, Goal, Holding, Insight, MonthFlow, NextDollar, Transaction } from '../../shared/types';
 import { plaidConfigured, plaidEnv } from './plaid';
 import { aiConfigured, MODEL } from './ai-config';
@@ -281,11 +282,29 @@ export function buildCore(now = new Date()): Core {
     monthlySpendAvg,
     monthlyIncomeAvg,
     nextDollar: null,
+    pay: payOf(settings, txns, today),
     recurring: detectRecurring(txns.filter((t) => t.date >= isoDate(new Date(now.getTime() - 130 * 86400000))), today),
     hasData,
   };
   state.nextDollar = nextDollar(state);
   return { state, txns };
+}
+
+function payOf(settings: AppState['settings'], txns: TxRow[], today: string): AppState['pay'] {
+  const since = new Date(Date.parse(today) - 120 * 86400000).toISOString().slice(0, 10);
+  const found = detectPay(txns.filter((t) => t.category === 'income' && t.amount > 0 && t.date >= since).map((t) => ({ date: t.date, amount: t.amount, name: t.merchant || t.name })));
+  const frequency = settings.pay.frequency;
+  // A detected schedule only fills in the blanks when it agrees with the stated frequency.
+  const usable = found && found.frequency === frequency ? found : null;
+  const anchor = settings.pay.anchor ?? usable?.lastDate ?? null;
+  return {
+    frequency,
+    amount: settings.pay.amount ?? usable?.amount ?? found?.amount ?? null,
+    anchor,
+    nextDate: anchor ? nextPaydays(anchor, frequency, today, 1)[0] : null,
+    perYear: paychecksPerYear(frequency),
+    detected: !!usable && settings.pay.anchor == null,
+  };
 }
 
 /** Where the next spare dollar does the most good — a simple, widely used ordering. */
@@ -295,23 +314,52 @@ function nextDollar(s: Core['state']): NextDollar | null {
   const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
   const high = s.debts.filter((d) => d.apr >= HIGH_APR);
   const fullTarget = essentials * s.settings.emergency_months;
-  const done = [s.totals.cash >= essentials, high.length === 0, s.totals.cash >= fullTarget, false];
-  const current = done.indexOf(false);
+  const match = s.settings.match;
+  const m = matchSummary(match);
   const top = high[0];
-  const steps = [
-    { label: 'One-month cushion', detail: `${fmt(Math.min(s.totals.cash, essentials))} of ${fmt(essentials)} in cash` },
-    { label: 'High-interest debt', detail: high.length ? `${high.length} balance${high.length > 1 ? 's' : ''} at ${HIGH_APR}%+ APR · ${fmt(high.reduce((t, d) => t + d.balance, 0))}` : `Nothing above ${HIGH_APR}% APR` },
-    { label: `${s.settings.emergency_months}-month emergency fund`, detail: `${fmt(Math.min(s.totals.cash, fullTarget))} of ${fmt(fullTarget)}` },
-    { label: 'Invest and fund goals', detail: s.totals.investments ? `${fmt(s.totals.investments)} invested` : 'Not started' },
-  ].map((st, i) => ({ ...st, done: done[i], current: i === current }));
-
-  const pick: Pick<NextDollar, 'target' | 'title' | 'reason'>[] = [
-    { target: 'buffer', title: 'Build a one-month cushion', reason: `About ${fmt(Math.max(0, essentials - s.totals.cash))} more in cash covers a month of essentials, so a surprise bill does not land on a card.` },
-    { target: 'debt', title: top ? `Pay down ${top.name}` : '', reason: top ? `At ${top.apr}% APR, every extra $100 here saves about ${fmt(top.apr)} a year — a guaranteed return that beats what savings or the market reliably pay.` : '' },
-    { target: 'emergency', title: `Grow your emergency fund`, reason: `${fmt(Math.max(0, fullTarget - s.totals.cash))} to go for ${s.settings.emergency_months} months of essentials. Your remaining debt is cheap enough to pay on schedule.` },
-    { target: 'invest', title: 'Invest it', reason: 'Cushion and emergency fund are in place and no debt is expensive. Extra money is best put to work in your long-term investments or goals.' },
+  const rungs: { done: boolean; label: string; detail: string; pick: Pick<NextDollar, 'target' | 'title' | 'reason'> }[] = [
+    {
+      done: s.totals.cash >= essentials,
+      label: 'One-month cushion',
+      detail: `${fmt(Math.min(s.totals.cash, essentials))} of ${fmt(essentials)} in cash`,
+      pick: { target: 'buffer', title: 'Build a one-month cushion', reason: `About ${fmt(Math.max(0, essentials - s.totals.cash))} more in cash covers a month of essentials, so a surprise bill does not land on a card.` },
+    },
   ];
-  return { ...pick[current], steps };
+  // A match is an instant return no debt payoff beats, so it comes before expensive debt.
+  if (match.rate > 0) {
+    rungs.push({
+      done: m.configured && m.full,
+      label: 'Full employer match',
+      detail: !m.configured ? 'Add your pay and contribution to check' : m.full ? `Collecting all ${fmt(m.employerMax)} a year` : `${fmt(m.unclaimed)} a year unclaimed`,
+      pick: m.configured
+        ? { target: 'match', title: `Raise your retirement contribution to ${match.limit_pct}%`, reason: `Your employer adds ${match.rate}¢ for every dollar up to ${match.limit_pct}% of pay and you are at ${match.contributing_pct}%. The missing ${fmt(m.costToMax)} a year would bring in ${fmt(m.unclaimed)} of match — an immediate ${match.rate}% return, more than any of your debts cost.` }
+        : { target: 'match', title: 'Check you are getting your full employer match', reason: `A ${match.rate}% match is an immediate ${match.rate}% return on every dollar it covers, more than any card charges. Enter your pay and contribution under Plan → Employer match to see whether any is going unclaimed.` },
+    });
+  }
+  rungs.push(
+    {
+      done: high.length === 0,
+      label: 'High-interest debt',
+      detail: high.length ? `${high.length} balance${high.length > 1 ? 's' : ''} at ${HIGH_APR}%+ APR · ${fmt(high.reduce((t, d) => t + d.balance, 0))}` : `Nothing above ${HIGH_APR}% APR`,
+      pick: { target: 'debt', title: top ? `Pay down ${top.name}` : '', reason: top ? `At ${top.apr}% APR, every extra $100 here saves about ${fmt(top.apr)} a year — a guaranteed return that beats what savings or the market reliably pay.` : '' },
+    },
+    {
+      done: s.totals.cash >= fullTarget,
+      label: `${s.settings.emergency_months}-month emergency fund`,
+      detail: `${fmt(Math.min(s.totals.cash, fullTarget))} of ${fmt(fullTarget)}`,
+      pick: { target: 'emergency', title: `Grow your emergency fund`, reason: `${fmt(Math.max(0, fullTarget - s.totals.cash))} to go for ${s.settings.emergency_months} months of essentials. Your remaining debt is cheap enough to pay on schedule.` },
+    },
+    {
+      done: false,
+      label: 'Invest and fund goals',
+      detail: s.totals.investments ? `${fmt(s.totals.investments)} invested` : 'Not started',
+      pick: { target: 'invest', title: 'Invest it', reason: 'Cushion and emergency fund are in place and no debt is expensive. Extra money is best put to work in your long-term investments or goals.' },
+    },
+  );
+  const current = rungs.findIndex((r) => !r.done);
+  const steps = rungs.map((r, i) => ({ label: r.label, detail: r.detail, done: r.done, current: i === current }));
+  return { ...rungs[current].pick, steps };
+
 }
 
 const ORDER: Record<string, number> = { critical: 0, warn: 1, info: 2, good: 3 };
